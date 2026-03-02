@@ -34,21 +34,24 @@ HEADERS = {
     "User-Agent": "LinkedInOutreachTool/1.0",
 }
 
-# Search queries: (location, bio_keyword, display_label)
+# Search queries: (query_string, location_label, title_label, display_label)
+# IMPORTANT: GitHub search API requires full query as a string — do NOT use
+# separate q_params with '+' between words (causes 422 errors).
+# Pass location with spaces inside quotes for multi-word locations.
 SEARCH_QUERIES = [
     # India — highest density of startup founders on GitHub
-    ("India", "founder",        "India/founder"),
-    ("India", "co-founder",     "India/co-founder"),
-    ("India", "CEO",            "India/CEO"),
-    ("India", "CTO",            "India/CTO"),
-    # United States
-    ("United+States", "founder",    "US/founder"),
-    ("United+States", "co-founder", "US/co-founder"),
+    ('type:user location:India in:bio founder',             "India",         "Founder",    "India/founder"),
+    ('type:user location:India in:bio CEO',                 "India",         "CEO",        "India/CEO"),
+    ('type:user location:India in:bio CTO',                 "India",         "CTO",        "India/CTO"),
+    # United States (by city — "United States" returns too few results)
+    ('type:user location:"San Francisco" in:bio founder',   "United States", "Founder",    "SF/founder"),
+    ('type:user location:"New York" in:bio founder',        "United States", "Founder",    "NY/founder"),
+    ('type:user location:California in:bio founder',        "United States", "Founder",    "CA/founder"),
     # United Kingdom
-    ("United+Kingdom", "founder",   "UK/founder"),
+    ('type:user location:"United Kingdom" in:bio founder',  "United Kingdom","Founder",    "UK/founder"),
+    ('type:user location:London in:bio founder',            "United Kingdom","Founder",    "London/founder"),
     # UAE
-    ("UAE",            "founder",   "UAE/founder"),
-    ("Dubai",          "founder",   "Dubai/founder"),
+    ('type:user location:Dubai in:bio founder',             "UAE",           "Founder",    "Dubai/founder"),
 ]
 
 # GitHub search returns max 1000 per query (10 pages x 100)
@@ -147,9 +150,8 @@ def _get_user_detail(login: str) -> Optional[dict]:
         return None
 
 
-def _search_users(location: str, bio_keyword: str, page: int) -> list[dict]:
+def _search_users(query: str, page: int) -> list[dict]:
     """Run one page of GitHub user search."""
-    query = f"type:user+location:{location}+in:bio+{bio_keyword}"
     params = {
         "q": query,
         "per_page": USERS_PER_PAGE,
@@ -159,13 +161,15 @@ def _search_users(location: str, bio_keyword: str, page: int) -> list[dict]:
     }
     try:
         resp = requests.get(GITHUB_SEARCH_URL, headers=HEADERS, params=params, timeout=20)
+        remaining = int(resp.headers.get("X-RateLimit-Remaining", 10))
+        reset = int(resp.headers.get("X-RateLimit-Reset", time.time() + 70))
         if resp.status_code == 200:
             return resp.json().get("items", [])
         if resp.status_code == 422:
-            return []   # bad query
-        if resp.status_code == 429 or resp.status_code == 403:
-            retry_after = int(resp.headers.get("X-RateLimit-Reset", time.time() + 70)) - int(time.time())
-            wait = max(retry_after, 60)
+            logger.warning(f"[GitHub] Invalid query (422): {query}")
+            return []
+        if resp.status_code in (429, 403):
+            wait = max(reset - int(time.time()), 60)
             logger.warning(f"[GitHub] Search rate limit, sleeping {wait}s")
             time.sleep(wait)
             return []
@@ -187,17 +191,17 @@ def scrape_github_founders(max_leads: int = 600) -> list[dict]:
 
     logger.info(f"[GitHub] Starting founder search across {len(SEARCH_QUERIES)} queries...")
 
-    for location, bio_keyword, label in SEARCH_QUERIES:
+    for query, location_label, title_label, display_label in SEARCH_QUERIES:
         if len(leads) >= max_leads:
             break
 
-        logger.info(f"[GitHub] Query: {label}")
+        logger.info(f"[GitHub] Query: {display_label}")
 
         for page in range(1, MAX_PAGES_PER_QUERY + 1):
             if len(leads) >= max_leads:
                 break
 
-            search_results = _search_users(location, bio_keyword, page)
+            search_results = _search_users(query, page)
             if not search_results:
                 break   # no more results for this query
 
@@ -258,17 +262,9 @@ def scrape_github_founders(max_leads: int = 600) -> list[dict]:
                 # Signal text = bio (tells us what they do/who they are)
                 signal_text = bio[:500]
 
-                # Location cleanup
-                if "india" in loc.lower():
-                    clean_loc = "India"
-                elif "united states" in loc.lower() or ", ca" in loc.lower() or ", ny" in loc.lower():
-                    clean_loc = "United States"
-                elif "united kingdom" in loc.lower() or ", uk" in loc.lower():
-                    clean_loc = "United Kingdom"
-                elif "uae" in loc.lower() or "dubai" in loc.lower():
-                    clean_loc = "UAE"
-                else:
-                    clean_loc = loc or "Unknown"
+                # Location: use the location_label from the search query (more reliable)
+                # since github profile location can be noisy
+                clean_loc = location_label
 
                 # Quality hint: higher-follower accounts are more likely real founders
                 quality_hint = min(followers // 100, 5)  # +0-5 bonus

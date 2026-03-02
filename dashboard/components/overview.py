@@ -52,18 +52,30 @@ def render(df: pd.DataFrame) -> None:
 
     with col_r:
         st.subheader("Leads by Location")
-        # Simplify location to country
+        # Location is already normalized — map to display name
+        LOC_MAP = {
+            "United States": "United States", "India": "India",
+            "United Kingdom": "United Kingdom", "UAE": "UAE",
+            "Remote/Global": "Remote/Global", "Europe": "Europe",
+            "Canada": "Canada", "Southeast Asia": "Southeast Asia",
+            "Africa": "Africa", "Latin America": "Latin America",
+            "East Asia": "East Asia", "Australia": "Australia",
+        }
         def extract_country(loc: str) -> str:
-            loc = str(loc).lower()
-            if "india" in loc or "south asia" in loc or "bangalore" in loc or "mumbai" in loc or "delhi" in loc or "hyderabad" in loc or "pune" in loc or "chennai" in loc:
+            loc = str(loc).strip()
+            if loc in LOC_MAP:
+                return LOC_MAP[loc]
+            # Fallback for any old-format values
+            lo = loc.lower()
+            if "india" in lo or "south asia" in lo:
                 return "India"
-            if "united states" in loc or "america" in loc or "usa" in loc or ", us" in loc or "san francisco" in loc or "new york" in loc or "seattle" in loc or "los angeles" in loc or "boston" in loc or "chicago" in loc or "austin" in loc or "america / canada" in loc:
+            if "united states" in lo or "america" in lo or "usa" in lo:
                 return "United States"
-            if "united kingdom" in loc or "europe" in loc and "london" in loc or "uk" in loc or "london" in loc:
+            if "united kingdom" in lo or "uk" in lo or "london" in lo:
                 return "United Kingdom"
-            if "uae" in loc or "emirates" in loc or "dubai" in loc:
+            if "uae" in lo or "emirates" in lo or "dubai" in lo:
                 return "UAE"
-            if "remote" in loc or "global" in loc or "worldwide" in loc:
+            if "remote" in lo or "global" in lo:
                 return "Remote/Global"
             return "Other"
 
