@@ -11,7 +11,8 @@ import plotly.graph_objects as go
 
 def render(df: pd.DataFrame) -> None:
     st.title("📊 Overview")
-    st.caption(f"Last updated: {df['scraped_at'].max() if not df.empty else 'N/A'}")
+    last_updated = df['scraped_at'].dropna().astype(str).max() if not df.empty else 'N/A'
+    st.caption(f"Last updated: {last_updated}")
 
     if df.empty:
         st.info("No leads yet. Run `python main.py` to start scraping.")

@@ -115,7 +115,7 @@ st.markdown(
 )
 
 # ── Data loader ──────────────────────────────────────────────────────────────
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def load_data() -> pd.DataFrame:
     csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output", "leads.csv")
     if os.path.exists(csv_path):
@@ -222,25 +222,6 @@ with st.sidebar:
                 f'font-size:0.9em; margin-bottom:2px;">{label}</div>',
                 unsafe_allow_html=True,
             )
-            # invisible button to keep click handling consistent
-            if st.button(label, key=f"nav_{key}_active", use_container_width=True):
-                pass  # already on this page
-            st.markdown(
-                f"""
-                <style>
-                button[kind="secondary"][data-testid="baseButton-secondary"]:last-of-type {{
-                    display: none;
-                }}
-                div[data-testid="stButton"]:has(button[key="nav_{key}_active"]) {{
-                    margin-top: -42px;
-                    opacity: 0;
-                    height: 0;
-                    overflow: hidden;
-                }}
-                </style>
-                """,
-                unsafe_allow_html=True,
-            )
         else:
             if st.button(label, key=f"nav_{key}", use_container_width=True):
                 st.session_state["page"] = key
@@ -262,21 +243,6 @@ with st.sidebar:
                 f'<div style="background:#DEEBFF; color:#0052CC; font-weight:600; '
                 f'border-radius:4px; padding:7px 12px 7px 18px; '
                 f'font-size:0.9em; margin-bottom:2px;">{label}</div>',
-                unsafe_allow_html=True,
-            )
-            if st.button(label, key=f"nav_{key}_active", use_container_width=True):
-                pass
-            st.markdown(
-                f"""
-                <style>
-                div[data-testid="stButton"]:has(button[key="nav_{key}_active"]) {{
-                    margin-top: -42px;
-                    opacity: 0;
-                    height: 0;
-                    overflow: hidden;
-                }}
-                </style>
-                """,
                 unsafe_allow_html=True,
             )
         else:
