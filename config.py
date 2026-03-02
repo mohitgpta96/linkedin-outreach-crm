@@ -14,7 +14,19 @@ RAPIDAPI_KEY  = os.getenv("RAPIDAPI_KEY", "")
 SUPABASE_URL  = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY  = os.getenv("SUPABASE_KEY", "")
 
+# ─── ICP (Ideal Customer Profile) — STRICT DEFINITION ───────────────────────
+# Target: Founders / CEOs / CTOs at tech startups who are ACTIVELY HIRING a PM.
+# A lead must have at least ONE confirmed PM hiring signal to stay in the pipeline.
+# All leads without PM hiring signals are deleted during the filter step.
+#
+# PM hiring signal = ANY of:
+#   - signal_text / signal_type references a PM job posting
+#   - growth_signals contains "Actively hiring PM" (from careers page scrape)
+#   - careers_page_roles mentions project/product manager
+#   - source is a PM job listing platform (The Muse, RemoteOK, HN, Wellfound, YC)
+
 # ─── Phase 1: Discovery ───────────────────────────────────────────────────────
+# STRICT: All keywords must indicate the founder/company is HIRING a PM.
 POST_KEYWORDS = [
     "hiring project manager",
     "looking for a PM",
@@ -26,6 +38,9 @@ POST_KEYWORDS = [
     "fresher project manager",
     "seeking project manager",
     "join us as project manager",
+    "open role project manager",
+    "we need a PM",
+    "building our PM team",
 ]
 
 JOB_SEARCH_TERMS = [
@@ -37,7 +52,7 @@ JOB_SEARCH_TERMS = [
     "Junior PM",
 ]
 
-# Only reach out to decision-makers
+# Only reach out to decision-makers (the people who actually hire PMs)
 TARGET_TITLES = [
     "Founder",
     "Co-Founder",
