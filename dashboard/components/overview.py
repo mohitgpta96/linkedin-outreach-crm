@@ -55,11 +55,16 @@ def render(df: pd.DataFrame) -> None:
         # Simplify location to country
         def extract_country(loc: str) -> str:
             loc = str(loc).lower()
-            if "india" in loc:           return "India"
-            if "united states" in loc or "usa" in loc or ", us" in loc:
+            if "india" in loc or "south asia" in loc or "bangalore" in loc or "mumbai" in loc or "delhi" in loc or "hyderabad" in loc or "pune" in loc or "chennai" in loc:
+                return "India"
+            if "united states" in loc or "america" in loc or "usa" in loc or ", us" in loc or "san francisco" in loc or "new york" in loc or "seattle" in loc or "los angeles" in loc or "boston" in loc or "chicago" in loc or "austin" in loc or "america / canada" in loc:
                 return "United States"
-            if "united kingdom" in loc or "uk" in loc: return "United Kingdom"
-            if "uae" in loc or "emirates" in loc:    return "UAE"
+            if "united kingdom" in loc or "europe" in loc and "london" in loc or "uk" in loc or "london" in loc:
+                return "United Kingdom"
+            if "uae" in loc or "emirates" in loc or "dubai" in loc:
+                return "UAE"
+            if "remote" in loc or "global" in loc or "worldwide" in loc:
+                return "Remote/Global"
             return "Other"
 
         df_loc = df.copy()
