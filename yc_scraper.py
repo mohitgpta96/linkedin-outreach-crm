@@ -104,21 +104,70 @@ def fetch_yc_companies():
     return filtered
 
 
-# ── Scrape YC company page for LinkedIn slugs ─────────────────────────────────
+# ── Scrape YC company page for LinkedIn slugs + founder names ─────────────────
 def scrape_yc_page(slug):
+    """
+    Returns list of (founder_name, linkedin_slug) tuples.
+    Uses 3 extraction methods in order of reliability:
+    1. JSON blob: "full_name":"NAME"..."linkedin_url":"...linkedin.com/in/SLUG"
+    2. HTML card: div.text-xl.font-bold > NAME < ...linkedin.com/in/SLUG
+    3. Fallback: slug-derived name
+    """
+    from html import unescape
     url = YC_COMPANY_URL.format(slug=slug)
     try:
         resp = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
         if resp.status_code != 200:
             return []
-        html = resp.text
-        slugs = re.findall(r'linkedin\.com/in/([a-zA-Z0-9\-]+)', html)
-        # deduplicate while preserving order
-        seen = []
-        for s in slugs:
-            if s not in seen:
-                seen.append(s)
-        return seen
+        html = unescape(resp.text)
+
+        result = []
+        seen_slugs = []
+
+        def add_pair(name, li_slug):
+            name = name.strip()
+            if not name or len(name) < 2:
+                return
+            has_emoji = bool(re.search(r'[^\x00-\x7F]', name))
+            if has_emoji or len(name.split()) > 5:
+                return
+            if li_slug not in seen_slugs:
+                seen_slugs.append(li_slug)
+                result.append((name, li_slug))
+
+        # Method 1: JSON blob — most reliable, covers cases where HTML order is reversed
+        # Pattern: "full_name":"Anin Sayana",...,"linkedin_url":"https://.../in/anin-sayana-xx/"
+        json_pairs = re.findall(
+            r'"full_name":"([^"]{2,60})"[^}]{0,500}?"linkedin_url":"[^"]*linkedin\.com/in/([a-zA-Z0-9\-]+)',
+            html,
+            re.DOTALL
+        )
+        for name, li_slug in json_pairs:
+            add_pair(name, li_slug)
+
+        if result:
+            return result
+
+        # Method 2: HTML founder card — div.text-xl.font-bold > name then linkedin url
+        html_pairs = re.findall(
+            r'text-xl font-bold\">([^<]{2,60})<.*?linkedin\.com/in/([a-zA-Z0-9\-]+)',
+            html,
+            re.DOTALL
+        )
+        for name, li_slug in html_pairs:
+            add_pair(name, li_slug)
+
+        if result:
+            return result
+
+        # Method 3: Fallback — just slugs, derive name from slug
+        slugs_found = re.findall(r'linkedin\.com/in/([a-zA-Z0-9\-]+)', html)
+        seen_fb = []
+        for s in slugs_found:
+            if s not in seen_fb:
+                seen_fb.append(s)
+        return [(clean_name_from_slug(s), s) for s in seen_fb]
+
     except Exception:
         return []
 
@@ -253,10 +302,10 @@ def generate_messages(first_name, company_name, one_liner, batch, website, title
     website_domain = re.sub(r'^https?://(www\.)?', '', website or "").rstrip("/") or company_name.lower().replace(" ", "") + ".com"
     title_lower = (title or "founder").lower()
 
-    # connection note < 40 words
+    # connection note < 40 words — starts with first name + observation, ends with curiosity question
     msg_note = (
-        f"{first_name}, building {company_name} to {one_liner_clean.lower()} is exactly the kind of problem worth obsessing over. "
-        f"How are you currently deciding what ships next?"
+        f"{first_name}, \"{one_liner_clean}\" — love what you're solving at {company_name}. "
+        f"Who's currently owning the roadmap and sprint process as you scale?"
     )
 
     # first DM < 60 words
@@ -320,12 +369,13 @@ def process_company(company, existing_urls):
     location = company.get("all_locations", "")
     regions = company.get("regions", [])
 
-    # Scrape YC page for LinkedIn slugs
-    li_slugs = scrape_yc_page(slug)
-    if not li_slugs:
+    # Scrape YC page for (name, linkedin_slug) pairs
+    founders = scrape_yc_page(slug)
+    if not founders:
         return None  # skip — no founder LinkedIn found
 
-    primary_slug = li_slugs[0]
+    # Use the first founder as primary lead
+    founder_name, primary_slug = founders[0]
     profile_url = f"https://www.linkedin.com/in/{primary_slug}"
 
     # Dedup check
@@ -333,8 +383,9 @@ def process_company(company, existing_urls):
         log(f"  [SKIP] Duplicate: {profile_url}")
         return None
 
-    # Clean founder name
-    founder_name = clean_name_from_slug(primary_slug)
+    # Use extracted name (already clean from HTML), fallback to slug derivation
+    if not founder_name or len(founder_name) < 2:
+        founder_name = clean_name_from_slug(primary_slug)
     first_name = founder_name.split()[0] if founder_name else "Founder"
 
     # Title — assume Founder/CEO for YC companies (we can't get exact title from page easily)
