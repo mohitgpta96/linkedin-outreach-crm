@@ -102,20 +102,45 @@ def render(df: pd.DataFrame) -> None:
         if new_verified != verified:
             st.session_state["selected_lead"]["verified"] = new_verified
 
-    # ── Why This Lead Was Found ───────────────────────────────
+    # ── PM Hiring Evidence ────────────────────────────────────
     st.divider()
-    st.subheader("🎯 Why This Person Was Found")
-    signal_type = _s(lead.get("signal_type"))
-    signal_date = _s(lead.get("signal_date"))
-    signal_text = _s(lead.get("signal_text"))
-    source      = _s(lead.get("source"))
+    st.subheader("🎯 Why We Know They're Hiring a PM")
 
-    info_cols = st.columns(3)
-    info_cols[0].markdown(f"**Source:** {source}")
-    info_cols[1].markdown(f"**Signal:** {signal_type}")
-    info_cols[2].markdown(f"**Date:** {signal_date} {temp_emoji}")
+    pm_evidence   = _s(lead.get("pm_hiring_evidence"))
+    pm_job_title  = _s(lead.get("pm_job_title"))
+    pm_job_desc   = _s(lead.get("pm_job_description"))
+    signal_type   = _s(lead.get("signal_type"))
+    signal_date   = _s(lead.get("signal_date"))
+    signal_text   = _s(lead.get("signal_text"))
+    source        = _s(lead.get("source"))
 
-    if signal_text:
+    # Source / date metadata
+    meta_cols = st.columns(3)
+    meta_cols[0].markdown(f"**Source:** {source}")
+    meta_cols[1].markdown(f"**Signal type:** {signal_type or 'careers page'}")
+    meta_cols[2].markdown(f"**Date:** {signal_date} {temp_emoji}")
+
+    # PM job details (highlighted box when available)
+    if pm_job_title:
+        st.markdown(
+            f"""<div style="background:#E3FCEF; border-left:4px solid #00875A;
+                border-radius:4px; padding:10px 14px; margin:8px 0;">
+                <span style="font-size:0.82em; color:#00875A; font-weight:700;
+                letter-spacing:0.05em;">OPEN ROLE</span><br>
+                <span style="font-size:1.05em; font-weight:600; color:#172B4D;">
+                {pm_job_title}</span>
+                {('<br><span style="font-size:0.88em; color:#5E6C84;">' + pm_job_desc[:200] + '...</span>') if pm_job_desc else ''}
+            </div>""",
+            unsafe_allow_html=True,
+        )
+
+    # Full evidence block
+    if pm_evidence:
+        st.markdown("**Evidence:**")
+        for line in pm_evidence.splitlines():
+            if line.strip():
+                st.markdown(line)
+    elif signal_text:
         st.markdown(f"> *{signal_text[:400]}*")
 
     # ── LinkedIn Profile ──────────────────────────────────────
