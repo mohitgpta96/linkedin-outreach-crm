@@ -234,13 +234,52 @@ def render(df: pd.DataFrame) -> None:
     wc_note = lead.get("msg_word_count_note", 0)
     wc_dm   = lead.get("msg_word_count_dm", 0)
 
-    for tab, msg, label, wc in zip(tabs, messages, day_labels, [wc_note, wc_dm, 0, 0, 0, 0]):
+    limits = [300, 75, 75, 75, 75, 75]
+    for tab, msg, label, wc, lim in zip(tabs, messages, day_labels, [wc_note, wc_dm, 0, 0, 0, 0], limits):
         with tab:
-            st.text_area(label, value=msg, height=110, key=f"msg_{label}_{name}")
-            if wc:
-                color = "green" if wc <= 75 else "orange"
-                st.caption(f"Word count: :{color}[{wc}] {'✅' if wc <= 75 else '⚠️ trim to < 75'}")
-            st.caption("💡 Copy the text above manually.")
+            if msg and msg != "Not yet generated":
+                # Word / char count
+                actual_wc = len(msg.split())
+                actual_cc = len(msg)
+                limit_col = lim if label == "Connection request note" else lim  # char for connection, word for others
+                use_char  = label == "Connection request note"
+                count_val = actual_cc if use_char else actual_wc
+                count_max = lim
+                ok        = count_val <= count_max
+                color     = "#16A34A" if ok else "#DC2626"
+                unit      = "chars" if use_char else "words"
+
+                st.markdown(
+                    f'<div style="font-size:11.5px; color:{color}; margin-bottom:4px;">'
+                    f'{"✅" if ok else "⚠️"} {count_val} {unit} '
+                    f'{"· within limit" if ok else f"· trim to <{count_max}"}</div>',
+                    unsafe_allow_html=True,
+                )
+                # Copyable code block (Streamlit adds a copy icon automatically)
+                st.code(msg, language=None)
+
+                # Editable text area below
+                with st.expander("✏️ Edit this message", expanded=False):
+                    st.text_area(label, value=msg, height=110, key=f"msg_{label}_{name}")
+
+                # Mark as sent button
+                purl_val = _s(lead.get("profile_url"))
+                status_map = {
+                    "Connection request note": "connection_sent",
+                    "First DM":               "accepted",
+                }
+                target_status = status_map.get(label)
+                if target_status and purl_val:
+                    if st.button(f"✅ Mark as {target_status.replace('_', ' ').title()}", key=f"mks_{label}_{name}"):
+                        try:
+                            from data_store import update_lead_status
+                            update_lead_status(purl_val, target_status)
+                            st.cache_data.clear()
+                            st.success(f"Marked as {target_status}")
+                        except Exception as e:
+                            st.error(f"Save failed: {e}")
+            else:
+                st.caption("Not generated yet — run enrichment.")
 
     # ── Warm-up Activity Log ──────────────────────────────────
     st.divider()

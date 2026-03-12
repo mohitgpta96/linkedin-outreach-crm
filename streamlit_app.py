@@ -30,7 +30,7 @@ html, body, [class*="css"], .stApp * {
 header[data-testid="stHeader"]        { display: none !important; }
 [data-testid="stDecoration"]          { display: none !important; }
 footer                                { display: none !important; }
-[data-testid="collapsedControl"]      { display: none !important; }
+[data-testid="collapsedControl"]      { color: #94A3B8 !important; }
 .viewerBadge_container__r5tak        { display: none !important; }
 
 /* App background */
@@ -293,6 +293,25 @@ def load_data() -> pd.DataFrame:
     if "pain_points" in df.columns and "inferred_pain_points" not in df.columns:
         df["inferred_pain_points"] = df["pain_points"]
 
+    # ── Merge deep enrichment (pm_gap_signal etc.) from JSON if available ──
+    enriched_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "leads", "high_priority", "top_50_enriched.json")
+    if os.path.exists(enriched_path):
+        import json
+        with open(enriched_path) as f:
+            enriched = json.load(f)
+        enrich_map = {str(l.get("profile_url", "") or ""): l for l in enriched if l.get("profile_url")}
+        enrich_fields = ["pm_gap_signal", "hiring_engineers", "hiring_pm", "company_description", "product_category", "final_score"]
+        for field in enrich_fields:
+            if field not in df.columns:
+                df[field] = None
+        url_col = "profile_url" if "profile_url" in df.columns else "linkedin_url"
+        if url_col in df.columns:
+            for idx, row in df.iterrows():
+                url = str(row.get(url_col) or "")
+                if url in enrich_map:
+                    for field in enrich_fields:
+                        df.at[idx, field] = enrich_map[url].get(field)
+
     return df
 
 
@@ -302,6 +321,9 @@ def _ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
         "lead_temperature": "Unknown", "pipeline_stage": "Found",
         "source": "", "title": "", "company": "", "name": "",
         "location": "", "verified": "", "notes": "",
+        "status": "new", "priority_score": 0,
+        "lead_stage": "", "date_contacted": "",
+        "run_id": "", "pipeline_name": "", "pipeline_version": "",
     }
     for col, default in defaults.items():
         if col not in df.columns:
@@ -322,9 +344,12 @@ if "page" not in st.session_state:
 
 NAV_ITEMS = [
     ("📊", "Overview"),
+    ("🎯", "Action Center"),
+    ("🔥", "Today"),
     ("📋", "Pipeline"),
     ("🗂️", "All Leads"),
     ("👤", "Lead Detail"),
+    ("📦", "Pipeline Runs"),
     ("⚡", "Enrichment"),
     ("🔭", "Observability"),
     ("📜", "Sent Log"),
@@ -387,6 +412,14 @@ if page == "Overview":
     from dashboard.components.overview import render as _r
     _r(df)
 
+elif page == "Action Center":
+    from dashboard.components.action_center import render as _r
+    _r(df)
+
+elif page == "Today":
+    from dashboard.components.next_best_leads import render as _r
+    _r(df)
+
 elif page == "Pipeline":
     from dashboard.components.pipeline_view import render as _r
     _r(df)
@@ -397,6 +430,10 @@ elif page == "All Leads":
 
 elif page == "Lead Detail":
     from dashboard.components.lead_detail import render as _r
+    _r(df)
+
+elif page == "Pipeline Runs":
+    from dashboard.components.pipeline_runs import render as _r
     _r(df)
 
 elif page == "Enrichment":

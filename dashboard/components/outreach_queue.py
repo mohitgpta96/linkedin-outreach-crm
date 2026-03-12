@@ -1,7 +1,6 @@
 """
-Send Queue page — shows today's 15 leads ready for connection request.
-Displays personalized note with one-click copy, LinkedIn profile link,
-and a terminal command to run the automation script.
+Outreach Queue — today's send queue + status-grouped board.
+Part 3 of the dashboard upgrade.
 """
 
 import os
@@ -43,6 +42,126 @@ def get_queue(df):
     return ready.head(DAILY_LIMIT)
 
 
+STATUS_COLORS = {
+    "new":             ("#EEF2FF", "#6366F1"),
+    "connection_sent": ("#FFF7ED", "#F97316"),
+    "accepted":        ("#F0FDF4", "#16A34A"),
+    "replied":         ("#ECFDF5", "#059669"),
+    "meeting_booked":  ("#DCFCE7", "#15803D"),
+    "closed":          ("#F1F5F9", "#64748B"),
+}
+STATUS_LABELS = {
+    "new":             "🆕 New",
+    "connection_sent": "📤 Connection Sent",
+    "accepted":        "✅ Accepted",
+    "replied":         "💬 Replied",
+    "meeting_booked":  "📅 Meeting Booked",
+    "closed":          "🏁 Closed",
+}
+
+
+def _mark_status(profile_url: str, status: str, key: str) -> None:
+    if st.button(f"→ {status.replace('_',' ').title()}", key=key, use_container_width=True):
+        try:
+            from data_store import update_lead_status
+            update_lead_status(profile_url, status)
+            st.cache_data.clear()
+            st.rerun()
+        except Exception as e:
+            st.error(f"Save failed: {e}")
+
+
+def _render_status_board(df: pd.DataFrame) -> None:
+    """Part 3: Outreach Queue grouped by status."""
+    if "status" not in df.columns:
+        df = df.copy()
+        df["status"] = "new"
+    else:
+        df = df.copy()
+        df["status"] = df["status"].fillna("new")
+
+    # Filter controls
+    fc1, fc2 = st.columns([2, 1])
+    with fc1:
+        statuses = ["All"] + list(STATUS_LABELS.keys())
+        filter_status = st.selectbox("Filter by status", statuses, label_visibility="collapsed", key="oq_status_filter")
+    with fc2:
+        search = st.text_input("search", placeholder="🔍 Search name...", label_visibility="collapsed", key="oq_search")
+
+    fdf = df.copy()
+    if search:
+        fdf = fdf[fdf.get("name", pd.Series()).str.contains(search, case=False, na=False) |
+                  fdf.get("company", pd.Series()).str.contains(search, case=False, na=False)]
+    if filter_status != "All":
+        fdf = fdf[fdf["status"] == filter_status]
+
+    if filter_status == "All":
+        # Show each group as a collapsible section
+        for status_key, status_label in STATUS_LABELS.items():
+            group = fdf[fdf["status"] == status_key]
+            bg, fg = STATUS_COLORS.get(status_key, ("#F8FAFC", "#64748B"))
+            with st.expander(f"{status_label}  ({len(group)})", expanded=(status_key == "new")):
+                if group.empty:
+                    st.caption("No leads in this stage.")
+                else:
+                    _render_status_group(group, status_key)
+    else:
+        group = fdf
+        _render_status_group(group, filter_status)
+
+
+def _render_status_group(group: pd.DataFrame, status_key: str) -> None:
+    bg, fg = STATUS_COLORS.get(status_key, ("#F8FAFC", "#64748B"))
+    next_status = {
+        "new": "connection_sent",
+        "connection_sent": "accepted",
+        "accepted": "replied",
+        "replied": "meeting_booked",
+        "meeting_booked": "closed",
+    }.get(status_key)
+
+    if "priority_score" in group.columns:
+        group = group.sort_values("priority_score", ascending=False)
+
+    for i, (_, row) in enumerate(group.head(30).iterrows()):
+        name    = str(row.get("name") or row.get("founder_name") or "—")
+        title   = str(row.get("title") or row.get("headline") or "")
+        company = str(row.get("company") or row.get("company_name") or "—")
+        purl    = str(row.get("profile_url") or row.get("linkedin_url") or "")
+        score   = int(row.get("priority_score") or row.get("quality_score") or 0)
+        note    = str(row.get("msg_connection_note") or row.get("connection_request") or "")
+
+        with st.container():
+            st.markdown(
+                f'<div style="background:#FFFFFF; border:1px solid #E2E8F0; border-left:3px solid {fg}; '
+                f'border-radius:8px; padding:12px 16px; margin-bottom:8px;">'
+                f'<div style="display:flex; justify-content:space-between;">'
+                f'<div><span style="font-weight:600; color:#0F172A; font-size:13.5px;">{name}</span>'
+                f'<span style="color:#94A3B8; font-size:12px; margin-left:8px;">{title} · {company}</span></div>'
+                f'<span style="background:{bg}; color:{fg}; font-size:11px; font-weight:700; '
+                f'padding:2px 8px; border-radius:10px;">{score}</span>'
+                f'</div></div>',
+                unsafe_allow_html=True,
+            )
+            act_cols = st.columns([1, 1, 1, 1])
+            with act_cols[0]:
+                if purl and purl.startswith("http"):
+                    st.link_button("🔗 LinkedIn", purl, use_container_width=True)
+            with act_cols[1]:
+                if note:
+                    if st.button("📋 Copy Note", key=f"oq_note_{i}_{status_key}_{purl or name}", use_container_width=True):
+                        st.session_state[f"oq_show_{i}_{status_key}"] = not st.session_state.get(f"oq_show_{i}_{status_key}", False)
+            with act_cols[2]:
+                if next_status:
+                    _mark_status(purl or name, next_status, f"oq_adv_{i}_{status_key}_{purl or name}")
+            with act_cols[3]:
+                if status_key != "new":
+                    _mark_status(purl or name, "new", f"oq_back_{i}_{status_key}_{purl or name}")
+
+            if st.session_state.get(f"oq_show_{i}_{status_key}", False) and note:
+                st.code(note, language=None)
+
+
 def render(df: pd.DataFrame):
     sent_today = count_sent_today()
     remaining  = max(0, DAILY_LIMIT - sent_today)
@@ -50,11 +169,20 @@ def render(df: pd.DataFrame):
     session_ok = SESSION_DIR.exists()
 
     # ── Header stats strip ──────────────────────────────────────────────────
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Today's Queue",    len(queue))
-    c2.metric("Sent Today",       sent_today)
-    c3.metric("Remaining",        remaining)
-    c4.metric("Total Queued",     int((df["pipeline_stage"] == "Found").sum()))
+    if "status" in df.columns:
+        status_counts = df["status"].value_counts()
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Today's Queue",    len(queue))
+        c2.metric("Sent Today",       sent_today)
+        c3.metric("Connection Sent",  int(status_counts.get("connection_sent", 0)))
+        c4.metric("Accepted",         int(status_counts.get("accepted", 0)))
+        c5.metric("Replied",          int(status_counts.get("replied", 0)))
+    else:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Today's Queue",    len(queue))
+        c2.metric("Sent Today",       sent_today)
+        c3.metric("Remaining",        remaining)
+        c4.metric("Total Queued",     int((df["pipeline_stage"] == "Found").sum()))
 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
@@ -116,6 +244,16 @@ def render(df: pd.DataFrame):
             )
 
     st.markdown("---")
+
+    # ── Tabs: Queue vs Status Board ────────────────────────────────────────
+    tab_queue, tab_board = st.tabs(["📋 Today's Queue", "📊 Status Board"])
+
+    with tab_board:
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        _render_status_board(df)
+
+    with tab_queue:
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
     # ── Queue table ─────────────────────────────────────────────────────────
     st.markdown(

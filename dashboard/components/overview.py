@@ -85,6 +85,56 @@ def render(df: pd.DataFrame) -> None:
         st.info("No leads yet. Run the pipeline to start scraping.")
         return
 
+    # ── Pipeline Metrics Row (Part 9) ────────────────────────────────────────
+    try:
+        from data_store import get_pipeline_runs
+        runs = get_pipeline_runs()
+        total_runs_count = len(runs)
+    except Exception:
+        runs = []
+        total_runs_count = 0
+
+    total_raw      = len(df)
+    total_qual     = int((pd.to_numeric(df.get("icp_score", df.get("quality_score", pd.Series())), errors="coerce").fillna(0) >= 70).sum())
+    total_enriched = int(df.get("enrichment_status", pd.Series()).isin(["ready","enriched","done"]).sum()) if "enrichment_status" in df.columns else 0
+    total_messages = int(df.get("msg_connection_note", pd.Series()).apply(lambda x: bool(str(x).strip() and str(x).strip().lower() not in ("nan","none",""))).sum()) if "msg_connection_note" in df.columns else 0
+    outreach_sent  = int(df.get("status", pd.Series()).isin(["connection_sent","accepted","replied","meeting_booked","closed"]).sum()) if "status" in df.columns else 0
+    total_replies  = int(df.get("status", pd.Series()).isin(["replied","meeting_booked","closed"]).sum()) if "status" in df.columns else 0
+    total_meetings = int(df.get("status", pd.Series()).isin(["meeting_booked"]).sum()) if "status" in df.columns else 0
+
+    st.markdown("""
+    <div style="font-size:12px; font-weight:700; color:#94A3B8; letter-spacing:0.08em;
+                text-transform:uppercase; margin-bottom:10px;">Pipeline Metrics</div>
+    """, unsafe_allow_html=True)
+
+    pm_cols = st.columns(7)
+    pipeline_metrics = [
+        ("Raw Leads",       total_raw,      "📥", "#6366F1"),
+        ("Qualified",       total_qual,     "✅", "#10B981"),
+        ("Enriched",        total_enriched, "🔍", "#8B5CF6"),
+        ("Messages Ready",  total_messages, "✉️", "#3B82F6"),
+        ("Outreach Sent",   outreach_sent,  "📤", "#F59E0B"),
+        ("Replies",         total_replies,  "💬", "#EC4899"),
+        ("Meetings",        total_meetings, "📅", "#14B8A6"),
+    ]
+    for col, (label, val, icon, color) in zip(pm_cols, pipeline_metrics):
+        with col:
+            st.markdown(f"""
+            <div style="background:#FFFFFF; border-radius:10px; border:1px solid #E2E8F0;
+                        padding:14px 16px; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
+                <div style="font-size:10.5px; font-weight:600; color:#94A3B8;
+                            letter-spacing:0.05em; text-transform:uppercase; margin-bottom:6px;">
+                    {label}
+                </div>
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <span style="font-size:16px;">{icon}</span>
+                    <span style="font-size:22px; font-weight:700; color:{color};">{val}</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
+
     # ── Stat cards ─────────────────────────────────────────────────────────────
     total    = len(df)
     hot      = len(df[df["lead_temperature"] == "Hot"])

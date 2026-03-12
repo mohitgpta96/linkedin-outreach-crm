@@ -13,6 +13,57 @@ TEMP_BADGE  = {
     "Cold":    ("#EFF6FF", "#3B82F6"),
     "Unknown": ("#F8FAFC", "#94A3B8"),
 }
+
+# Part 2 — Lead lifecycle stage colors
+LEAD_STAGE_STYLE: dict[str, tuple[str, str]] = {
+    "new":            ("#F1F5F9", "#64748B"),
+    "qualified":      ("#EFF6FF", "#3B82F6"),
+    "enriched":       ("#F5F3FF", "#8B5CF6"),
+    "personalized":   ("#FFF7ED", "#F97316"),
+    "message_ready":  ("#F0FDF4", "#22C55E"),
+    "contacted":      ("#FEFCE8", "#CA8A04"),
+    "replied":        ("#ECFEFF", "#0891B2"),
+    "meeting_booked": ("#DCFCE7", "#16A34A"),
+    "closed":         ("#FEF2F2", "#EF4444"),
+    "skipped":        ("#F9FAFB", "#9CA3AF"),
+}
+LEAD_STAGE_ICONS = {
+    "new": "○", "qualified": "◔", "enriched": "◑", "personalized": "◕",
+    "message_ready": "●", "contacted": "📤", "replied": "💬",
+    "meeting_booked": "📅", "closed": "✓", "skipped": "×",
+}
+LEAD_STAGE_PROGRESS = [
+    "new", "qualified", "enriched", "personalized",
+    "message_ready", "contacted", "replied", "meeting_booked",
+]
+
+
+def _lead_stage_badge(stage: str) -> str:
+    bg, fg = LEAD_STAGE_STYLE.get(stage, ("#F1F5F9", "#64748B"))
+    icon   = LEAD_STAGE_ICONS.get(stage, "•")
+    label  = stage.replace("_", " ").title()
+    return (
+        f'<span style="background:{bg}; color:{fg}; font-size:10.5px; font-weight:600; '
+        f'padding:2px 8px; border-radius:20px; white-space:nowrap;">'
+        f'{icon} {label}</span>'
+    )
+
+
+def _mini_progress(stage: str) -> str:
+    """Compact 8-step dot progress bar."""
+    try:
+        idx = LEAD_STAGE_PROGRESS.index(stage)
+    except ValueError:
+        idx = -1
+    dots = ""
+    for i, s in enumerate(LEAD_STAGE_PROGRESS):
+        bg, fg = LEAD_STAGE_STYLE.get(s, ("#E2E8F0", "#94A3B8"))
+        if i <= idx:
+            color = fg
+        else:
+            color = "#E2E8F0"
+        dots += f'<span style="display:inline-block; width:7px; height:7px; border-radius:50%; background:{color}; margin:0 1px;"></span>'
+    return f'<div style="line-height:1; padding:3px 0;">{dots}</div>'
 STAGE_BADGE = {
     "Found":         ("#EEF2FF", "#6366F1"),
     "ICP Candidate": ("#FFF7ED", "#F97316"),
@@ -99,10 +150,13 @@ def show_lead_modal(row: dict) -> None:
     notes_val   = _s(row.get("notes"))
     enrichment  = _s(row.get("enrichment_status"))
     signal_date = _s(row.get("signal_date") or "")
+    pm_gap      = row.get("pm_gap_signal") in (True, "True", "true", 1, "1")
 
     temp_bg, temp_fg   = TEMP_BADGE.get(temp, ("#F8FAFC", "#94A3B8"))
     stage_bg, stage_fg = STAGE_BADGE.get(stage, ("#F8FAFC", "#64748B"))
     display_score      = icp_score if icp_score > score else score
+
+    pm_gap_badge = _badge("⚡ PM GAP", "#FFF7ED", "#EA580C", bold=True) if pm_gap else ""
 
     # ── Header ──────────────────────────────────────────────────────
     st.markdown(f"""
@@ -120,6 +174,7 @@ def show_lead_modal(row: dict) -> None:
             {_score_chip(display_score)}
             {_badge(stage, stage_bg, stage_fg)}
             {_badge(enrichment.upper(), '#F0FDF4', '#16A34A') if enrichment else ''}
+            {pm_gap_badge}
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -284,22 +339,80 @@ def render(df: pd.DataFrame) -> None:
     </div>
     """, unsafe_allow_html=True)
 
-    # ── Filters ────────────────────────────────────────────────────
+    # Ensure computed columns
+    df = df.copy()
+    if "priority_score" not in df.columns or pd.to_numeric(df["priority_score"], errors="coerce").fillna(0).sum() == 0:
+        try:
+            from data_store import compute_priority_score
+            df["priority_score"] = df.apply(lambda r: compute_priority_score(r.to_dict()), axis=1)
+        except Exception:
+            df["priority_score"] = 0
+    else:
+        df["priority_score"] = pd.to_numeric(df["priority_score"], errors="coerce").fillna(0).astype(int)
+
+    if "status" not in df.columns:
+        df["status"] = "new"
+
+    # Part 1: compute lead_stage
+    try:
+        from data_store import compute_lead_stage, LEAD_STAGES
+        if "lead_stage" not in df.columns or not df["lead_stage"].isin(LEAD_STAGES).any():
+            df["lead_stage"] = df.apply(lambda r: compute_lead_stage(r.to_dict()), axis=1)
+        else:
+            mask = ~df["lead_stage"].isin(LEAD_STAGES)
+            if mask.any():
+                df.loc[mask, "lead_stage"] = df[mask].apply(lambda r: compute_lead_stage(r.to_dict()), axis=1)
+    except Exception:
+        if "lead_stage" not in df.columns:
+            df["lead_stage"] = "new"
+
+    # ── Filters Row 1 ──────────────────────────────────────────────
     fc1, fc2, fc3, fc4, fc5 = st.columns([3, 1.5, 1.5, 1.5, 1.2])
     with fc1:
         search = st.text_input("search", placeholder="🔍  Search name, company, title...",
                                 label_visibility="collapsed")
     with fc2:
-        all_stages  = ["All stages"]  + sorted(df["pipeline_stage"].dropna().unique().tolist())
-        filter_stage = st.selectbox("Stage", all_stages, label_visibility="collapsed")
+        # Part 6: lead_stage filter (primary)
+        ls_opts = ["All stages"] + list(LEAD_STAGE_STYLE.keys())
+        filter_lead_stage = st.selectbox("Lead Stage", ls_opts, label_visibility="collapsed", key="lt_lead_stage")
     with fc3:
         all_sources = ["All sources"] + sorted(df["source"].dropna().unique().tolist())
         filter_src  = st.selectbox("Source", all_sources, label_visibility="collapsed")
     with fc4:
-        all_temps   = ["All temps"]   + sorted(df["lead_temperature"].dropna().unique().tolist())
-        filter_temp = st.selectbox("Temp", all_temps, label_visibility="collapsed")
+        # Part 6: persona filter
+        persona_col = next((c for c in ["persona", "persona_match", "icp_signal_type"] if c in df.columns), None)
+        if persona_col:
+            persona_opts = ["All personas"] + sorted(df[persona_col].dropna().unique().tolist())
+            filter_persona = st.selectbox("Persona", persona_opts, label_visibility="collapsed", key="lt_persona")
+        else:
+            filter_persona = "All personas"
+            st.caption("")
     with fc5:
-        min_score = st.number_input("Min", 0, 100, 0, step=10, label_visibility="collapsed")
+        min_score = st.number_input("Min ICP", 0, 100, 0, step=10, label_visibility="collapsed")
+
+    # ── Filters Row 2 ──────────────────────────────────────────────
+    fr1, fr2, fr3, fr4 = st.columns([1.5, 1.5, 1.5, 1.5])
+    with fr1:
+        # Part 6: industry filter
+        ind_col = next((c for c in ["industry", "company_industry"] if c in df.columns), None)
+        if ind_col:
+            ind_opts = ["All industries"] + sorted(df[ind_col].dropna().unique().tolist())
+            filter_industry = st.selectbox("Industry", ind_opts, label_visibility="collapsed", key="lt_industry")
+        else:
+            filter_industry = "All industries"
+            st.caption("")
+    with fr2:
+        if "run_id" in df.columns and df["run_id"].notna().any():
+            run_opts = ["All runs"] + sorted(df["run_id"].dropna().unique().tolist())
+            filter_run = st.selectbox("Pipeline Run", run_opts, label_visibility="collapsed", key="lt_run_filter")
+        else:
+            filter_run = "All runs"
+            st.caption("")
+    with fr3:
+        min_priority = st.number_input("Min Priority", 0, 100, 0, step=10, label_visibility="collapsed", key="lt_min_priority")
+    with fr4:
+        all_temps   = ["All temps"] + sorted(df["lead_temperature"].dropna().unique().tolist())
+        filter_temp = st.selectbox("Temp", all_temps, label_visibility="collapsed")
 
     # ── Apply filters ──────────────────────────────────────────────
     fdf = df.copy()
@@ -310,16 +423,24 @@ def render(df: pd.DataFrame) -> None:
             | fdf["title"].str.contains(search, case=False, na=False)
         )
         fdf = fdf[m]
-    if filter_stage != "All stages":
-        fdf = fdf[fdf["pipeline_stage"] == filter_stage]
+    if filter_lead_stage != "All stages":
+        fdf = fdf[fdf["lead_stage"] == filter_lead_stage]
     if filter_src != "All sources":
         fdf = fdf[fdf["source"] == filter_src]
     if filter_temp != "All temps":
         fdf = fdf[fdf["lead_temperature"] == filter_temp]
+    if filter_persona != "All personas" and persona_col:
+        fdf = fdf[fdf[persona_col] == filter_persona]
+    if filter_industry != "All industries" and ind_col:
+        fdf = fdf[fdf[ind_col] == filter_industry]
+    if filter_run != "All runs" and "run_id" in fdf.columns:
+        fdf = fdf[fdf["run_id"] == filter_run]
 
     score_col = "icp_score" if "icp_score" in fdf.columns and fdf["icp_score"].sum() > 0 else "quality_score"
     fdf = fdf[fdf[score_col] >= min_score]
-    fdf = fdf.sort_values(score_col, ascending=False).reset_index(drop=True)
+    if min_priority > 0:
+        fdf = fdf[fdf["priority_score"] >= min_priority]
+    fdf = fdf.sort_values("priority_score", ascending=False).reset_index(drop=True)
 
     # ── Pagination ─────────────────────────────────────────────────
     PAGE_SIZE   = 50
@@ -341,73 +462,80 @@ def render(df: pd.DataFrame) -> None:
     # ── Table header ───────────────────────────────────────────────
     st.markdown("""
     <div style="display:grid;
-                grid-template-columns:36px 24px 200px 1fr 120px 100px 120px 80px;
+                grid-template-columns:28px 18px 165px 1fr 150px 90px 68px 68px;
                 gap:0; padding:10px 12px;
                 background:#F8FAFC; border:1px solid #E2E8F0;
                 border-radius:10px 10px 0 0;
-                font-size:11px; font-weight:700; color:#94A3B8;
+                font-size:10.5px; font-weight:700; color:#94A3B8;
                 letter-spacing:0.07em; text-transform:uppercase;">
         <div>#</div><div></div><div>Name</div><div>Title · Company</div>
-        <div>Location</div><div>Source</div><div>Stage</div><div style="text-align:right;">Score</div>
+        <div>Lead Stage + Progress</div><div>Location</div>
+        <div style="text-align:right;">ICP</div><div style="text-align:right;">Priority</div>
     </div>
     """, unsafe_allow_html=True)
 
     # ── Rows ───────────────────────────────────────────────────────
     for i, (_, row) in enumerate(page_df.iterrows(), start=start_idx + 1):
-        temp     = _s(row.get("lead_temperature"))
-        name     = _s(row.get("name")) or "—"
-        title    = _s(row.get("title")) or ""
-        company  = _s(row.get("company")) or "—"
-        location = _s(row.get("location")) or "—"
-        source   = _s(row.get("source")) or "—"
-        stage    = _s(row.get("pipeline_stage")) or "Found"
-        s_score  = int(row.get(score_col) or 0)
-        purl     = _s(row.get("profile_url") or "")
+        temp       = _s(row.get("lead_temperature"))
+        name       = _s(row.get("name")) or "—"
+        title      = _s(row.get("title")) or ""
+        company    = _s(row.get("company")) or "—"
+        location   = _s(row.get("location")) or "—"
+        lead_stage = _s(row.get("lead_stage")) or "new"
+        s_score    = int(row.get(score_col) or 0)
+        priority   = int(row.get("priority_score") or 0)
+        purl       = _s(row.get("profile_url") or "")
 
         temp_emoji = TEMP_EMOJI.get(temp, "")
-        sbg, sfg   = STAGE_BADGE.get(stage, ("#F8FAFC", "#64748B"))
+        row_bg     = "background:#FFFFFF;"
+        pm_gap     = row.get("pm_gap_signal") in (True, "True", "true", 1, "1")
+        pm_gap_dot = '<span title="PM Gap — hiring engineers, no PM yet" style="display:inline-block; width:7px; height:7px; background:#EA580C; border-radius:50%; margin-left:5px; vertical-align:middle;"></span>' if pm_gap else ""
 
-        # Row border style
-        row_bg = "background:#FFFFFF;"
-
-        cs = st.columns([0.32, 0.22, 1.9, 3.8, 1.15, 0.9, 1.1, 0.75])
+        cs = st.columns([0.24, 0.16, 1.5, 3.2, 1.4, 0.8, 0.58, 0.58])
         with cs[0]:
-            st.markdown(f'<div style="padding:13px 4px 13px 4px; font-size:12px; color:#CBD5E1; {row_bg}">{i}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="padding:13px 4px; font-size:12px; color:#CBD5E1; {row_bg}">{i}</div>', unsafe_allow_html=True)
         with cs[1]:
             st.markdown(f'<div style="padding:13px 0; font-size:14px; {row_bg}">{temp_emoji}</div>', unsafe_allow_html=True)
         with cs[2]:
             st.markdown(
                 f'<div style="padding:11px 0; font-weight:600; font-size:13px; '
                 f'color:#0F172A; {row_bg} white-space:nowrap; overflow:hidden; '
-                f'text-overflow:ellipsis;">{name}</div>',
+                f'text-overflow:ellipsis;">{name}{pm_gap_dot}</div>',
                 unsafe_allow_html=True,
             )
         with cs[3]:
+            pm_gap_badge = '&nbsp;<span style="font-size:10px;background:#FFF7ED;color:#EA580C;padding:1px 5px;border-radius:6px;font-weight:600;">⚡PM</span>' if pm_gap else ""
             st.markdown(
                 f'<div style="padding:8px 0; font-size:12.5px; {row_bg}">'
                 f'<div style="color:#374151; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{title}</div>'
-                f'<div style="color:#94A3B8; font-size:12px; margin-top:1px;">{company}</div></div>',
+                f'<div style="color:#94A3B8; font-size:12px; margin-top:1px;">{company}{pm_gap_badge}</div>'
+                f'</div>',
                 unsafe_allow_html=True,
             )
         with cs[4]:
-            st.markdown(f'<div style="padding:13px 0; font-size:12px; color:#64748B; {row_bg}">{location[:18]}</div>', unsafe_allow_html=True)
+            # Part 2: lead_stage badge + Part 8: progress bar
+            st.markdown(
+                f'<div style="padding:8px 0; {row_bg}">'
+                f'{_lead_stage_badge(lead_stage)}'
+                f'<div style="margin-top:5px;">{_mini_progress(lead_stage)}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
         with cs[5]:
-            st.markdown(f'<div style="padding:13px 0; font-size:12px; color:#94A3B8; {row_bg}">{source[:14]}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="padding:13px 0; font-size:11.5px; color:#64748B; {row_bg}">{location[:16]}</div>', unsafe_allow_html=True)
         with cs[6]:
             st.markdown(
-                f'<div style="padding:10px 0; {row_bg}">'
-                f'{_badge(stage, sbg, sfg)}</div>',
+                f'<div style="padding:12px 2px; text-align:right; font-size:12px; font-weight:600; color:#6366F1;">{s_score}</div>',
                 unsafe_allow_html=True,
             )
         with cs[7]:
             if st.button(
-                f"{s_score}",
+                f"{priority}",
                 key=f"open_{i}_{purl or name}",
                 use_container_width=True,
-                help=f"Open detail: {name}",
+                help=f"Priority: {priority} · Click to open detail",
             ):
                 show_lead_modal(row.to_dict())
-
         # Row divider
         st.markdown(
             '<div style="height:1px; background:#F1F5F9; margin:0;"></div>',
