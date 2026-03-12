@@ -327,6 +327,32 @@ def render(df: pd.DataFrame) -> None:
 
     df = df[df["pipeline_stage"] != "Scrapped"].copy()
 
+    # ── Active filter breadcrumb ────────────────────────────────────
+    from dashboard.utils.filter_engine import get_active_filter, apply_filter, clear_filter
+    active_filter, active_label = get_active_filter()
+
+    if active_filter and active_filter != "all":
+        df_filtered = apply_filter(df)
+        # Breadcrumb + clear
+        bc1, bc2 = st.columns([5, 1])
+        with bc1:
+            st.markdown(
+                f'<div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">'
+                f'<span style="font-size:13px; color:#94A3B8;">Dashboard</span>'
+                f'<span style="color:#CBD5E1;">›</span>'
+                f'<span style="font-size:13px; font-weight:600; color:#4338CA;">{active_label}</span>'
+                f'<span style="background:#EEF2FF; color:#6366F1; font-size:11px; font-weight:600; '
+                f'padding:2px 8px; border-radius:10px; margin-left:4px;">{len(df_filtered):,} leads</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        with bc2:
+            if st.button("✕ Clear filter", key="lt_clear_filter", use_container_width=True):
+                clear_filter()
+                st.rerun()
+    else:
+        df_filtered = df
+
     # ── Page header ────────────────────────────────────────────────
     st.markdown(f"""
     <div style="margin-bottom:20px;">
@@ -334,13 +360,14 @@ def render(df: pd.DataFrame) -> None:
             All Leads
         </div>
         <div style="font-size:13px; color:#94A3B8; margin-top:4px;">
-            {len(df)} leads total &nbsp;·&nbsp; click any row to open detail view
+            {len(df_filtered):,} leads &nbsp;·&nbsp; click any row to open detail view
         </div>
     </div>
     """, unsafe_allow_html=True)
 
     # Ensure computed columns
     df = df.copy()
+    # Ensure computed columns exist on the base df (used for filter dropdowns)
     if "priority_score" not in df.columns or pd.to_numeric(df["priority_score"], errors="coerce").fillna(0).sum() == 0:
         try:
             from data_store import compute_priority_score
@@ -353,7 +380,7 @@ def render(df: pd.DataFrame) -> None:
     if "status" not in df.columns:
         df["status"] = "new"
 
-    # Part 1: compute lead_stage
+    # Part 1: compute lead_stage on base df
     try:
         from data_store import compute_lead_stage, LEAD_STAGES
         if "lead_stage" not in df.columns or not df["lead_stage"].isin(LEAD_STAGES).any():
@@ -365,6 +392,15 @@ def render(df: pd.DataFrame) -> None:
     except Exception:
         if "lead_stage" not in df.columns:
             df["lead_stage"] = "new"
+
+    # Propagate computed columns into df_filtered
+    for _col in ("priority_score", "status", "lead_stage"):
+        if _col in df.columns and _col not in df_filtered.columns:
+            df_filtered = df_filtered.copy()
+            df_filtered[_col] = df[_col].reindex(df_filtered.index)
+        elif _col in df.columns:
+            df_filtered = df_filtered.copy()
+            df_filtered[_col] = df[_col].reindex(df_filtered.index).combine_first(df_filtered[_col])
 
     # ── Filters Row 1 ──────────────────────────────────────────────
     fc1, fc2, fc3, fc4, fc5 = st.columns([3, 1.5, 1.5, 1.5, 1.2])
@@ -414,8 +450,8 @@ def render(df: pd.DataFrame) -> None:
         all_temps   = ["All temps"] + sorted(df["lead_temperature"].dropna().unique().tolist())
         filter_temp = st.selectbox("Temp", all_temps, label_visibility="collapsed")
 
-    # ── Apply filters ──────────────────────────────────────────────
-    fdf = df.copy()
+    # ── Apply manual filters on top of any active dashboard filter ──
+    fdf = df_filtered.copy()
     if search:
         m = (
             fdf["name"].str.contains(search, case=False, na=False)
