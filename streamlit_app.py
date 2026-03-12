@@ -36,12 +36,14 @@ footer                                { display: none !important; }
 /* App background */
 .stApp { background: #F8FAFC !important; }
 
-/* ── SIDEBAR — Dark premium ── */
+/* ── SIDEBAR — Dark premium — always visible ── */
 section[data-testid="stSidebar"] {
     background: #0F172A !important;
     min-width: 248px !important;
     max-width: 248px !important;
     border-right: none !important;
+    transform: none !important;
+    visibility: visible !important;
 }
 section[data-testid="stSidebar"] > div:first-child {
     background: #0F172A !important;
