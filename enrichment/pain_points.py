@@ -190,83 +190,92 @@ def _generate_messages(lead: dict) -> dict:
     elif "funding" in (lead.get("signal_type") or ""):
         funding = lead.get("funding_amount") or lead.get("funding_stage") or "recent funding"
         trigger_ref = f"your {funding} round"
+    elif signal_text and any(kw in signal_text.lower() for kw in ["pm", "project manager", "scrum"]):
+        trigger_ref = f"the PM search at {company}"
     else:
-        trigger_ref = f"the PM role at {company}"
+        trigger_ref = f"how {company} is scaling"
 
     pain_hook = ""
     if "roadmap" in pain_points.lower():
-        pain_hook = "roadmap ownership across your team"
+        pain_hook = "roadmap ownership"
     elif "sprint" in pain_points.lower() or "delivery" in pain_points.lower():
-        pain_hook = "the delivery process as your team scales"
+        pain_hook = "the delivery process"
     elif "engineer" in pain_points.lower():
-        pain_hook = "keeping your engineers focused on building (not managing)"
+        pain_hook = "keeping engineers focused on building"
     else:
-        pain_hook = "how you're managing product priorities right now"
+        pain_hook = "product delivery"
 
     # Use company name + what they do for a natural observation
-    if what_they_do and not what_they_do.lower().startswith(company.lower()):
-        product_obs = f"{company} — {what_they_do[:70].rstrip('. ')} — is solving a real problem."
-    elif what_they_do:
-        product_obs = f"{what_they_do[:80].rstrip('. ')} — genuinely solving a real problem."
+    _wtd_generic = (not what_they_do or
+                    what_they_do.lower().startswith("what you're building") or
+                    what_they_do.lower() == company.lower())
+    if not _wtd_generic:
+        snippet = what_they_do[:70].rstrip(". ")
+        product_obs = f"What {company} is building — {snippet} — is genuinely interesting."
     else:
-        product_obs = f"What you're building at {company} is solving a real problem."
+        product_obs = f"What you're building at {company} looks interesting."
 
     # ── CONNECTION REQUEST NOTE (~40 words, starts with THEM) ──
     connection_note = (
         f"{first_name}, saw {trigger_ref}. "
         f"{product_obs} "
-        f"How are you currently thinking about {pain_hook}?"
+        f"Curious how you're managing {pain_hook}?"
     )
     # Trim to < 300 chars for connection note
     if len(connection_note) > 290:
         connection_note = (
             f"{first_name}, saw {trigger_ref}. "
-            f"How are you thinking about {pain_hook}?"
+            f"Curious how you're handling {pain_hook}?"
         )
 
     # ── FIRST DM — Day 0 (~60 words, give-first) ──
-    what_snippet = what_they_do[:70].strip().rstrip(".") if what_they_do else f"what you're building at {company}"
+    _generic = what_they_do.lower().startswith("what you're building") or what_they_do.lower() == company.lower()
+    what_snippet = what_they_do[:70].strip().rstrip(".") if (what_they_do and not _generic) else None
+    if what_snippet:
+        dm_opener = f"spent time on {company} — {what_snippet}. Genuinely interesting problem space."
+    else:
+        dm_opener = f"spent time on {company}'s product — genuinely interesting problem space."
     first_dm = (
-        f"{first_name}, spent time on {company} — {what_snippet}. "
-        f"Really interesting problem space. "
-        f"Curious: {pain_hook}?"
+        f"{first_name}, {dm_opener} "
+        f"How are you currently handling {pain_hook} as the team scales? "
+        f"Happy to share what fractional PM support looks like — no full-time hire needed."
     )
 
-    # ── FOLLOW-UP #1 — Day 4 (new angle) ──
+    # ── FOLLOW-UP #1 — Day 7 (new angle — operational) ──
     followup_1 = (
-        f"{first_name}, no pressure — just saw your latest post about "
-        f"{notable_post[:50].strip() or 'delivery speed'}. "
-        f"What does your current process look like? Happy to share what's worked for similar-stage teams."
+        f"{first_name}, not trying to be pushy — just thinking about {company}'s roadmap. "
+        f"What does your current delivery process look like? "
+        f"Happy to share what's worked for similar-stage teams without any commitment."
     )
 
-    # ── FOLLOW-UP #2 — Day 10 (website reference) ──
+    # ── FOLLOW-UP #2 — Day 14 (website reference + soft ask) ──
     followup_2 = (
-        f"{first_name}, one more thought: {company}'s mission is around "
-        f"{what_they_do[:60].strip() or 'solving a real problem'} — "
-        f"yet that's exactly what your internal team is navigating right now. "
-        f"Still open to a quick 15-min call?"
+        f"{first_name}, one more thought: {company} is solving "
+        f"{what_they_do[:50].strip().rstrip('.') or 'a real problem'} — "
+        f"that kind of product velocity needs tight PM support. "
+        f"Would a quick 15-min call make sense?"
     )
 
-    # ── FOLLOW-UP #3 — Day 17 (referral / low pressure — Aaron Ross) ──
+    # ── FOLLOW-UP #3 — Day 21 (referral / low pressure — Aaron Ross) ──
     followup_3 = (
-        f"{first_name}, if the PM role is still open and timing isn't right, "
-        f"would you know someone else hiring in a similar space? "
+        f"{first_name}, if the timing isn't right for fractional PM support, "
+        f"no worries at all — would you know another founder in a similar situation? "
         f"Either way, rooting for {company}."
     )
 
-    # ── FOLLOW-UP #4 — Day 25 (breakup) ──
+    # ── FOLLOW-UP #4 — Day 28 (breakup) ──
     followup_4 = (
-        f"{first_name}, last one from me — I'll leave the door open. "
+        f"{first_name}, last note from me — leaving the door open whenever the timing works. "
         f"Loved what you're building at {company}."
     )
 
     return {
         "msg_connection_note":  connection_note,
         "msg_first_dm":         first_dm,
-        "msg_followup_day4":    followup_1,
-        "msg_followup_day10":   followup_2,
-        "msg_followup_day17":   followup_3,
-        "msg_followup_day25":   followup_4,
+        "msg_followup_day7":    followup_1,
+        "msg_followup_day14":   followup_2,
+        "msg_followup_day21":   followup_3,
+        "msg_followup_day28":   followup_4,
         "msg_word_count_note":  _word_count(connection_note),
         "msg_word_count_dm":    _word_count(first_dm),
     }

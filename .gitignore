@@ -30,3 +30,24 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# LinkedIn session & browser data
+output/.linkedin_session/
+output/*.csv
+output/enriched/
+output/.pipeline_checkpoint.json
+output/company_leads.csv
+
+# Leads data (sensitive)
+leads/raw/
+leads/qualified/
+leads/enriched/
+leads/personalized/
+leads/messages/
+cache/
+logs/
+
+# Old page files
+pages/
+scripts/deep_enrich_top10.py
+scripts/enrich_rapidapi.py

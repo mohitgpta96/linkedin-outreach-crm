@@ -35,23 +35,26 @@ def _copy_block(label: str, text: str, key: str) -> None:
 
 
 def render(df: pd.DataFrame) -> None:
-    # Sidebar lead selector
     if df.empty:
         st.info("No leads found. Run the pipeline first.")
         return
 
-    with st.sidebar:
-        st.markdown("### Select Lead")
-        lead_options = [
-            f"{r.get('name','?')} — {r.get('company','?')} ({r.get('quality_score',0)})"
-            for _, r in df.head(50).iterrows()
-        ]
-        lead_idx = st.selectbox("Lead", range(len(lead_options)),
-                                format_func=lambda i: lead_options[i],
-                                key="lead_detail_idx")
+    # Inline lead selector (no sidebar)
+    lead_options = [
+        f"{r.get('name','?')} — {r.get('company','?')} (score: {r.get('quality_score',0)})"
+        for _, r in df.head(100).iterrows()
+    ]
+    col_sel, col_info = st.columns([3, 1])
+    with col_sel:
+        lead_idx = st.selectbox(
+            "Select Lead",
+            range(len(lead_options)),
+            format_func=lambda i: lead_options[i],
+            key="lead_detail_idx",
+        )
+    with col_info:
+        st.caption(f"Showing {len(lead_options)} of {len(df)} leads (top by score)")
 
-    # Auto-render based on selectbox — no button needed
-    lead_idx = st.session_state.get("lead_detail_idx", 0)
     selected = df.iloc[lead_idx].to_dict()
 
     lead = selected
@@ -83,16 +86,14 @@ def render(df: pd.DataFrame) -> None:
         current_stage = _s(lead.get("pipeline_stage")) or "Found"
         idx = PIPELINE_STAGES.index(current_stage) if current_stage in PIPELINE_STAGES else 0
         new_stage = st.selectbox("Pipeline Stage", PIPELINE_STAGES, index=idx)
-        if new_stage != current_stage:
-            st.session_state["selected_lead"]["pipeline_stage"] = new_stage
-            # Update in DB if possible
+        if new_stage != current_stage and profile_url:
             try:
-                from database import update_lead_status
-                if profile_url:
-                    update_lead_status(profile_url, {"pipeline_stage": new_stage})
-                    st.success(f"Stage updated to: {new_stage}")
-            except Exception:
-                st.caption("(DB update skipped — credentials not configured)")
+                from data_store import update_stage
+                update_stage(profile_url, new_stage)
+                st.cache_data.clear()
+                st.success(f"✅ Stage updated to: {new_stage}")
+            except Exception as e:
+                st.error(f"Save failed: {e}")
     with col_b:
         verified = _s(lead.get("verified"))
         new_verified = st.selectbox(
@@ -216,20 +217,20 @@ def render(df: pd.DataFrame) -> None:
 
     tabs = st.tabs([
         "Connection Note", "First DM (Day 0)",
-        "Follow-up 1 (Day 4)", "Follow-up 2 (Day 10)",
-        "Follow-up 3 (Day 17)", "Follow-up 4 (Day 25)",
+        "Follow-up Day 7", "Follow-up Day 14",
+        "Follow-up Day 21", "Follow-up Day 28",
     ])
 
     messages = [
         _s(lead.get("msg_connection_note")) or "Not yet generated",
         _s(lead.get("msg_first_dm")) or "Not yet generated",
-        _s(lead.get("msg_followup_day4")) or "Not yet generated",
-        _s(lead.get("msg_followup_day10")) or "Not yet generated",
-        _s(lead.get("msg_followup_day17")) or "Not yet generated",
-        _s(lead.get("msg_followup_day25")) or "Not yet generated",
+        _s(lead.get("msg_followup_day7")) or "Not yet generated",
+        _s(lead.get("msg_followup_day14")) or "Not yet generated",
+        _s(lead.get("msg_followup_day21")) or "Not yet generated",
+        _s(lead.get("msg_followup_day28")) or "Not yet generated",
     ]
-    day_labels = ["Connection request note", "First DM", "Follow-up Day 4",
-                  "Follow-up Day 10", "Follow-up Day 17", "Follow-up Day 25"]
+    day_labels = ["Connection request note", "First DM", "Follow-up Day 7",
+                  "Follow-up Day 14", "Follow-up Day 21", "Follow-up Day 28"]
     wc_note = lead.get("msg_word_count_note", 0)
     wc_dm   = lead.get("msg_word_count_dm", 0)
 
@@ -268,14 +269,14 @@ def render(df: pd.DataFrame) -> None:
         height=100,
         key=f"notes_{name}",
     )
-    if st.button("Save Notes", key=f"save_notes_{name}"):
-        st.session_state["selected_lead"]["notes"] = notes
-        try:
-            from database import update_lead_status
-            if profile_url:
-                update_lead_status(profile_url, {"notes": notes})
-                st.success("Notes saved!")
-            else:
-                st.warning("No profile URL — notes saved in session only.")
-        except Exception:
-            st.caption("(DB not configured — notes in session only)")
+    if st.button("💾 Save Notes", key=f"save_notes_{name}"):
+        if profile_url:
+            try:
+                from data_store import upsert_lead
+                upsert_lead({"profile_url": profile_url, "notes": notes})
+                st.cache_data.clear()
+                st.success("✅ Notes saved!")
+            except Exception as e:
+                st.error(f"Save failed: {e}")
+        else:
+            st.warning("No profile URL — cannot save.")
