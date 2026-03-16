@@ -26,7 +26,7 @@ from discord_bot.utils.formatters import (
 )
 
 GROQ_API_KEY     = os.getenv("GROQ_API_KEY", "")
-MODEL            = "llama-3.3-70b-versatile"
+MODEL            = "llama-3.1-8b-instant"   # 500k TPD limit vs 100k for 70b-versatile
 
 SYSTEM_PROMPT = """You are OutreachBot — an intelligent LinkedIn outreach assistant for Mohit.
 
