@@ -31,7 +31,7 @@ COGS = [
     "discord_bot.cogs.lead_commands",
     "discord_bot.cogs.alert_system",
     "discord_bot.cogs.daily_summary",
-    "discord_bot.cogs.natural_language",
+    "discord_bot.cogs.agent",
     "discord_bot.cogs.voice_controller",
 ]
 
@@ -124,7 +124,7 @@ async def on_ready():
     print(f"{'='*50}")
     print(f"  Prefix: !")
     print(f"  Channels configured: {_check_channels()}")
-    print(f"  Groq: {'✓ Configured' if os.getenv('GROQ_API_KEY') else '✗ Not set (NL + voice disabled)'}")
+    print(f"  Agent: {'✓ Claude Haiku ready' if os.getenv('ANTHROPIC_API_KEY') else '✗ ANTHROPIC_API_KEY not set'}")
     print(f"  Alerts: {'✓ Active' if os.getenv('DISCORD_ALERTS_CHANNEL_ID') else '✗ No channel set'}")
     print(f"{'='*50}\n")
     print("OutreachBot is ready. Type !help in OutreachBot HQ.")
