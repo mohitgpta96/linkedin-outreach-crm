@@ -110,8 +110,8 @@ def filter_leads(f: str) -> list[dict]:
         return [l for l in leads if str(l.get("pm_demand_tier","")).upper() == "STRONG"]
     if f == "warm":
         return [l for l in leads if str(l.get("pm_demand_tier","")).upper() == "WARM"]
-    if f in ("ready", "enriched"):
-        return [l for l in leads if l.get("outreach_stage","new") == "new"]
+    if f in ("ready", "enriched", "new"):
+        return [l for l in leads if l.get("outreach_stage", "") == "new"]
     if f == "warming":
         return [l for l in leads if l.get("outreach_stage","") == "warming_up"]
     if f == "contacted":

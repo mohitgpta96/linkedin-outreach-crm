@@ -30,7 +30,7 @@ Available commands:
 - lead_advance: {name: str, target_stage: str|null}
 - lead_skip: {name: str, reason: str}
 - lead_search: {query: str}
-- leads_list: {filter: all|ready|enriched|warming|contacted|replied|hot|strong|warm}
+- leads_list: {filter: all|new|ready|enriched|warming|contacted|replied|hot|strong|warm}
 - today_tasks: {}
 - stats: {}
 - warmup_done: {name: str, day: int}
@@ -94,6 +94,12 @@ async def parse_with_groq(text: str) -> dict:
 # Rule-based fallback (no API needed for common patterns)
 def parse_rule_based(text: str) -> dict | None:
     t = text.lower().strip()
+
+    # Lead list filters
+    if any(x in t for x in ["new leads","nayi leads","naye leads","show leads","dikhao leads","leads dikhao","all leads","saari leads"]):
+        if any(x in t for x in ["new","nayi","naye"]) and "all" not in t and "saar" not in t:
+            return {"command": "leads_list", "args": {"filter": "new"}}
+        return {"command": "leads_list", "args": {"filter": "all"}}
 
     # Stats / counts
     if any(x in t for x in ["kitni leads","how many leads","stats","kitna","count"]):
