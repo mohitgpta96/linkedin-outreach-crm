@@ -43,7 +43,8 @@ leads/raw/
 leads/qualified/
 leads/enriched/
 leads/personalized/
-leads/messages/
+leads/messages/*
+!leads/messages/enriched_leads.json
 cache/
 logs/
 
