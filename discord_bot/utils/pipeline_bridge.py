@@ -33,6 +33,42 @@ def _should_use_db() -> bool:
     return _USE_DB
 
 
+def _normalize_lead(lead: dict) -> dict:
+    """
+    Map Neon DB column names to the standard field names expected by bridge
+    functions and formatters. DB uses founder_name/company_name/linkedin_url;
+    formatters expect name/company/profile_url.
+    """
+    out = dict(lead)
+    # Name: DB uses founder_name or first_name
+    if not out.get("name"):
+        out["name"] = out.get("founder_name") or out.get("first_name") or "Unknown"
+    # Company: DB uses company_name
+    if not out.get("company"):
+        out["company"] = out.get("company_name") or "—"
+    # Profile URL: DB uses linkedin_url
+    if not out.get("profile_url"):
+        out["profile_url"] = out.get("linkedin_url") or ""
+    # Title: DB uses headline as fallback
+    if not out.get("title"):
+        out["title"] = out.get("title") or out.get("headline") or "—"
+    # Connection request: DB uses msg_connection_note
+    if not out.get("connection_request"):
+        out["connection_request"] = out.get("msg_connection_note") or ""
+    # Pain point: DB uses pain_points
+    if not out.get("pain_point"):
+        out["pain_point"] = out.get("pain_points") or ""
+    # ICP score: DB uses icp_score, JSON uses icp_priority_score
+    if not out.get("icp_priority_score"):
+        out["icp_priority_score"] = out.get("icp_score") or out.get("quality_score") or 0
+    # Company size: DB uses employee_count
+    if not out.get("company_size"):
+        out["company_size"] = out.get("employee_count") or "?"
+    # Mark as DB-sourced so filters know to use enrichment_status
+    out["_source"] = "db"
+    return out
+
+
 # ── Data access ───────────────────────────────────────────────────────────────
 
 def load_leads() -> list[dict]:
@@ -44,7 +80,8 @@ def load_leads() -> list[dict]:
     # Cloud / DB path
     try:
         import data_store
-        return data_store.get_leads()
+        raw = data_store.get_leads()
+        return [_normalize_lead(l) for l in raw]
     except Exception:
         return []
 
@@ -111,7 +148,19 @@ def filter_leads(f: str) -> list[dict]:
     if f == "warm":
         return [l for l in leads if str(l.get("pm_demand_tier","")).upper() == "WARM"]
     if f in ("ready", "enriched", "new"):
-        return [l for l in leads if l.get("outreach_stage", "") == "new"]
+        # "new" = leads enriched and ready to send connection requests
+        # DB leads: use enrichment_status (all DB leads have generic msg_connection_note)
+        # JSON leads: use connection_request field presence (locally enriched leads)
+        # ready + enriched = proper personalized messages; deep_enriched has broken messages
+        ENRICHED_STATUSES = {"ready", "enriched"}
+        def _is_ready(l):
+            if l.get("_source") == "db":
+                # For DB leads, rely on enrichment_status being properly set
+                return str(l.get("enrichment_status", "")).lower() in ENRICHED_STATUSES
+            # For JSON leads, check connection_request presence
+            cr = l.get("connection_request") or ""
+            return bool(str(cr).strip()) and str(cr).strip().lower() not in ("none", "nan", "")
+        return [l for l in leads if _is_ready(l)]
     if f == "warming":
         return [l for l in leads if l.get("outreach_stage","") == "warming_up"]
     if f == "contacted":
