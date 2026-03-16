@@ -54,40 +54,52 @@ Return ONLY JSON, no explanation:
 {"command": "...", "args": {...}}"""
 
 
+NL_MODELS = [
+    "llama-3.1-8b-instant",
+    "llama3-groq-8b-8192-tool-use-preview",
+    "llama3-groq-70b-8192-tool-use-preview",
+    "llama-3.3-70b-versatile",
+]
+
+
 async def parse_with_groq(text: str) -> dict:
-    """Call Groq API to parse natural language into structured command."""
+    """Call Groq API to parse natural language. Auto-cascades through models on 429."""
     if not GROQ_API_KEY:
         return {"command": "unknown", "args": {}}
-    try:
-        import aiohttp
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {GROQ_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": "llama-3.1-8b-instant",
-                    "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user",   "content": text},
-                    ],
-                    "temperature": 0.1,
-                    "max_tokens": 200,
-                },
-                timeout=aiohttp.ClientTimeout(total=8),
-            ) as resp:
-                if resp.status != 200:
-                    return {"command": "unknown", "args": {}}
-                data = await resp.json()
-                raw = data["choices"][0]["message"]["content"].strip()
-                # Extract JSON
-                match = re.search(r'\{.*\}', raw, re.DOTALL)
-                if match:
-                    return json.loads(match.group())
-    except Exception as e:
-        print(f"[NL] Groq parse error: {e}")
+    import aiohttp
+    for model in NL_MODELS:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {GROQ_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": SYSTEM_PROMPT},
+                            {"role": "user",   "content": text},
+                        ],
+                        "temperature": 0.1,
+                        "max_tokens": 200,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=8),
+                ) as resp:
+                    if resp.status == 429:
+                        print(f"[NL] {model} rate-limited, trying next...")
+                        continue
+                    if resp.status != 200:
+                        return {"command": "unknown", "args": {}}
+                    data = await resp.json()
+                    raw = data["choices"][0]["message"]["content"].strip()
+                    match = re.search(r'\{.*\}', raw, re.DOTALL)
+                    if match:
+                        return json.loads(match.group())
+        except Exception as e:
+            print(f"[NL] {model} error: {e}")
+            continue
     return {"command": "unknown", "args": {}}
 
 

@@ -25,8 +25,16 @@ from discord_bot.utils.formatters import (
     lead_embed, leads_list_embed, messages_embed, stats_embed,
 )
 
-GROQ_API_KEY     = os.getenv("GROQ_API_KEY", "")
-MODEL            = "llama-3.1-8b-instant"   # 500k TPD limit vs 100k for 70b-versatile
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+
+# Cascade: if a model hits its daily/minute limit, bot auto-retries with the next one.
+# All models below support tool calling on Groq free tier.
+MODELS = [
+    "llama-3.1-8b-instant",                  # 500k TPD — primary, fastest
+    "llama3-groq-8b-8192-tool-use-preview",   # separate quota, optimised for tools
+    "llama3-groq-70b-8192-tool-use-preview",  # separate quota, smarter fallback
+    "llama-3.3-70b-versatile",               # last resort
+]
 
 SYSTEM_PROMPT = """You are OutreachBot — an intelligent LinkedIn outreach assistant for Mohit.
 
@@ -369,17 +377,35 @@ class IntelligentAgent(commands.Cog):
             await self._run_agent(message.channel)
 
     async def _run_agent(self, channel: discord.TextChannel):
-        """Agentic loop — model plans, calls tools, responds autonomously."""
+        """Agentic loop — model plans, calls tools, responds autonomously.
+        Auto-cascades through MODELS on rate-limit (429) errors."""
         from groq import AsyncGroq
         client = AsyncGroq(api_key=GROQ_API_KEY)
 
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + list(self.history[channel.id])
 
+        # Pick the first model that isn't rate-limited
+        active_model = MODELS[0]
+        for candidate in MODELS:
+            try:
+                await client.chat.completions.create(
+                    model=candidate,
+                    messages=[{"role": "user", "content": "hi"}],
+                    max_tokens=1,
+                )
+                active_model = candidate
+                break
+            except Exception as probe_err:
+                if "429" in str(probe_err) or "rate_limit" in str(probe_err).lower():
+                    continue   # try next model
+                active_model = candidate  # non-rate-limit error — use this model anyway
+                break
+
         MAX_ITERATIONS = 5
         for _ in range(MAX_ITERATIONS):
             try:
                 response = await client.chat.completions.create(
-                    model=MODEL,
+                    model=active_model,
                     messages=messages,
                     tools=TOOLS,
                     tool_choice="auto",
@@ -387,6 +413,12 @@ class IntelligentAgent(commands.Cog):
                     temperature=0.2,
                 )
             except Exception as e:
+                err = str(e)
+                if ("429" in err or "rate_limit" in err.lower()) and active_model != MODELS[-1]:
+                    # Current model hit limit mid-conversation — cascade to next
+                    idx = MODELS.index(active_model)
+                    active_model = MODELS[idx + 1]
+                    continue
                 await channel.send(f"❌ Agent error: {e}")
                 return
 
