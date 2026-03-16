@@ -51,7 +51,7 @@ CHANNELS_SPEC = [
 
 async def _setup_channels(guild: discord.Guild):
     """Create missing bot channels and write IDs to .env."""
-    env_text = ENV_PATH.read_text()
+    env_text = ENV_PATH.read_text() if ENV_PATH.exists() else ""
     updated = False
 
     existing_text = {ch.name for ch in guild.channels}
@@ -81,7 +81,7 @@ async def _setup_channels(guild: discord.Guild):
         os.environ[env_key] = ch_id
         updated = True
 
-    if updated:
+    if updated and ENV_PATH.exists():
         ENV_PATH.write_text(env_text)
         print("  ✓ Channel IDs saved to .env")
 
